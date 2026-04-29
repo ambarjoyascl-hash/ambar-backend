@@ -1,0 +1,1 @@
+export default async function handler(req,res){res.setHeader("Access-Control-Allow-Origin","*");if(req.method!=="POST")return res.status(405).end();const{nombre,email,productos,total}=req.body;console.log("PEDIDO:",nombre,email,total,productos);return res.json({ok:true});}
