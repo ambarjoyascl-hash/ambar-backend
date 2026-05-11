@@ -1,3 +1,35 @@
+async function enviarEmail({ apiKey, de, para, asunto, html }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ from: de, to: [para], subject: asunto, html }),
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.message || "Error enviando email");
+  }
+  return response.json();
+}
+
+function construirTablaProductos(productos) {
+  if (!Array.isArray(productos)) {
+    return `<tr><td colspan="3" style="padding:8px">${productos}</td></tr>`;
+  }
+  return productos
+    .map(
+      (p) => `
+      <tr>
+        <td style="padding:10px 8px;border-bottom:1px solid #eee">${p.nombre || p.name || "Producto"}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:center">${p.cantidad || p.qty || 1}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid #eee;text-align:right">$${(p.precio || p.price || 0).toLocaleString("es-CL")}</td>
+      </tr>`
+    )
+    .join("");
+}
+
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -12,66 +44,95 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: "Faltan datos del pedido" });
   }
 
-  const productosHtml = Array.isArray(productos)
-    ? productos
-        .map(
-          (p) =>
-            `<tr>
-              <td style="padding:8px;border-bottom:1px solid #eee">${p.nombre || p.name}</td>
-              <td style="padding:8px;border-bottom:1px solid #eee;text-align:center">${p.cantidad || p.qty || 1}</td>
-              <td style="padding:8px;border-bottom:1px solid #eee;text-align:right">$${(p.precio || p.price || 0).toLocaleString("es-CL")}</td>
-            </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="3" style="padding:8px">${productos}</td></tr>`;
+  const apiKey = process.env.RESEND_API_KEY;
+  const ownerEmail = process.env.OWNER_EMAIL || "hola@ambarjoyas.cl";
+  const totalFormateado = `$${Number(total).toLocaleString("es-CL")}`;
+  const tablaProductos = construirTablaProductos(productos);
 
-  const html = `
+  const estiloTabla = `width:100%;border-collapse:collapse;margin:16px 0`;
+  const estiloEncabezado = `background:#8B6914;color:#fff`;
+  const estiloCelda = `padding:10px 8px;text-align:left`;
+
+  // Email al dueño de la tienda
+  const htmlDueno = `
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-      <h2 style="color:#8B6914;border-bottom:2px solid #8B6914;padding-bottom:8px">
-        Nuevo pedido — Ambar Joyas
-      </h2>
-      <p><strong>Cliente:</strong> ${nombre}</p>
-      <p><strong>Email:</strong> ${email}</p>
-      <table style="width:100%;border-collapse:collapse;margin:16px 0">
-        <thead>
-          <tr style="background:#8B6914;color:#fff">
-            <th style="padding:8px;text-align:left">Producto</th>
-            <th style="padding:8px;text-align:center">Cantidad</th>
-            <th style="padding:8px;text-align:right">Precio</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${productosHtml}
-        </tbody>
-      </table>
-      <p style="font-size:18px;font-weight:bold;text-align:right;color:#8B6914">
-        Total: $${Number(total).toLocaleString("es-CL")}
-      </p>
-      <hr style="margin-top:24px;border:none;border-top:1px solid #eee"/>
-      <p style="font-size:12px;color:#999">Ambar Joyas — www.ambarjoyas.cl</p>
+      <div style="background:#8B6914;padding:24px;text-align:center">
+        <h1 style="color:#fff;margin:0;font-size:22px">Nuevo pedido recibido</h1>
+      </div>
+      <div style="padding:24px">
+        <p style="margin:0 0 8px"><strong>Cliente:</strong> ${nombre}</p>
+        <p style="margin:0 0 20px"><strong>Email:</strong> ${email}</p>
+        <table style="${estiloTabla}">
+          <thead>
+            <tr style="${estiloEncabezado}">
+              <th style="${estiloCelda}">Producto</th>
+              <th style="${estiloCelda};text-align:center">Cant.</th>
+              <th style="${estiloCelda};text-align:right">Precio</th>
+            </tr>
+          </thead>
+          <tbody>${tablaProductos}</tbody>
+        </table>
+        <p style="font-size:20px;font-weight:bold;text-align:right;color:#8B6914;margin:8px 0">
+          Total: ${totalFormateado}
+        </p>
+      </div>
+      <div style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999">
+        Ambar Joyas — www.ambarjoyas.cl
+      </div>
+    </div>
+  `;
+
+  // Email de confirmación al cliente
+  const htmlCliente = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <div style="background:#8B6914;padding:24px;text-align:center">
+        <h1 style="color:#fff;margin:0;font-size:22px">Gracias por tu compra, ${nombre}</h1>
+      </div>
+      <div style="padding:24px">
+        <p style="color:#555;line-height:1.6">
+          Hemos recibido tu pedido con exito. Nos pondremos en contacto contigo a la brevedad
+          para coordinar el envio.
+        </p>
+        <table style="${estiloTabla}">
+          <thead>
+            <tr style="${estiloEncabezado}">
+              <th style="${estiloCelda}">Producto</th>
+              <th style="${estiloCelda};text-align:center">Cant.</th>
+              <th style="${estiloCelda};text-align:right">Precio</th>
+            </tr>
+          </thead>
+          <tbody>${tablaProductos}</tbody>
+        </table>
+        <p style="font-size:20px;font-weight:bold;text-align:right;color:#8B6914;margin:8px 0">
+          Total: ${totalFormateado}
+        </p>
+        <p style="color:#555;line-height:1.6;margin-top:20px">
+          Si tienes alguna pregunta, escribenos a <a href="mailto:${ownerEmail}" style="color:#8B6914">${ownerEmail}</a>.
+        </p>
+      </div>
+      <div style="background:#f9f9f9;padding:16px;text-align:center;font-size:12px;color:#999">
+        Ambar Joyas — www.ambarjoyas.cl
+      </div>
     </div>
   `;
 
   try {
-    const response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: "Ambar Joyas <pedidos@ambarjoyas.cl>",
-        to: [process.env.OWNER_EMAIL || "hola@ambarjoyas.cl"],
-        subject: `Nuevo pedido de ${nombre} — $${Number(total).toLocaleString("es-CL")}`,
-        html,
+    await Promise.all([
+      enviarEmail({
+        apiKey,
+        de: "Ambar Joyas <pedidos@ambarjoyas.cl>",
+        para: ownerEmail,
+        asunto: `Nuevo pedido de ${nombre} — ${totalFormateado}`,
+        html: htmlDueno,
       }),
-    });
-
-    if (!response.ok) {
-      const err = await response.json();
-      console.error("Error Resend:", err);
-      return res.status(500).json({ ok: false, error: "No se pudo enviar el email" });
-    }
+      enviarEmail({
+        apiKey,
+        de: "Ambar Joyas <pedidos@ambarjoyas.cl>",
+        para: email,
+        asunto: `Confirmacion de tu pedido — ${totalFormateado}`,
+        html: htmlCliente,
+      }),
+    ]);
 
     return res.json({ ok: true });
   } catch (e) {
